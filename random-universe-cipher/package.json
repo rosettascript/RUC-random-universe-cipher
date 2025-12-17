@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && npm run copy:wasm",
     "build:wasm": "cd wasm && wasm-pack build --target web --release --out-dir pkg",
     "build:cpp-wasm": "cd cpp-wasm && chmod +x build.sh && ./build.sh",
     "build:all": "npm run build:cpp-wasm && npm run build:wasm && npm run build",
+    "copy:wasm": "mkdir -p dist/cpp-wasm/pkg && cp -f cpp-wasm/pkg/*.js dist/cpp-wasm/pkg/ 2>/dev/null || true && cp -f cpp-wasm/pkg/*.wasm dist/cpp-wasm/pkg/ 2>/dev/null || true",
+    "build:gh-pages": "npm run build:cpp-wasm && BASE_PATH=\"/$npm_package_name/\" npm run build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

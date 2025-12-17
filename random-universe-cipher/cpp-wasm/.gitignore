@@ -1,0 +1,6 @@
+build/
+pkg/
+*.wasm
+*.js
+*.map
+

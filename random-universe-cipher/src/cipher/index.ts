@@ -44,6 +44,9 @@ export { decryptBlock } from './decrypt';
 export { encryptCTR, decryptCTR, encryptCBC, decryptCBC, encrypt, decrypt } from './modes';
 export { encryptCTRFast, decryptCTRFast, encryptFast, decryptFast } from './modes-fast';
 export { initWASM, isWASMAvailable, encryptBlockWASM, decryptBlockWASM } from './wasm-accelerated';
+export { encryptCTRCppParallel, decryptCTRCppParallel, encryptCppParallel, decryptCppParallel } from './modes-cpp-parallel';
+export { ParallelWorkerPool, getCpuCoreCount } from './parallel-worker';
+export { preloadCppWASM, isCppWASMPreloaded } from './wasm-preload';
 
 // Re-export AEAD (authenticated encryption)
 export { aeadEncrypt, aeadDecrypt, aeadEncryptString, aeadDecryptString } from './aead';
@@ -77,6 +80,7 @@ import { BYTES } from './constants';
 import { deriveKeyFromPassword, generateRandomKey as genKey } from './key-expansion';
 import { encryptCTR, decryptCTR } from './modes';
 import { encryptCTRFast, decryptCTRFast } from './modes-fast';
+import { encryptCTRCppParallel, decryptCTRCppParallel } from './modes-cpp-parallel';
 import { aeadEncrypt, aeadDecrypt } from './aead';
 import { deriveKeyArgon2, generateSalt, type KDFLevel } from './kdf';
 import { stringToBytes, bytesToString, randomBytes, concatBytes, constantTimeEqual } from './bigint-utils';
@@ -535,16 +539,30 @@ export async function encryptWithPasswordAEADFast(
   
   if (onProgress) onProgress(15);
   
-  // Use fast CTR encryption
-  const ctrEncrypted = await encryptCTRFast(
-    data,
-    key,
-    undefined,
-    (progress) => {
-      // Map CTR progress (0-100) to overall progress (15-75)
-      if (onProgress) onProgress(15 + Math.floor(progress * 0.6));
-    }
-  );
+  // Use C++ WASM parallel encryption (fastest) with fallback to JavaScript
+  let ctrEncrypted: Uint8Array;
+  try {
+    ctrEncrypted = await encryptCTRCppParallel(
+      data,
+      key,
+      undefined,
+      (progress) => {
+        // Map CTR progress (0-100) to overall progress (15-75)
+        if (onProgress) onProgress(15 + Math.floor(progress * 0.6));
+      }
+    );
+  } catch (error) {
+    // Fallback to JavaScript if C++ WASM fails
+    console.warn('C++ WASM failed, using JavaScript fallback:', error);
+    ctrEncrypted = await encryptCTRFast(
+      data,
+      key,
+      undefined,
+      (progress) => {
+        if (onProgress) onProgress(15 + Math.floor(progress * 0.6));
+      }
+    );
+  }
   
   // Extract nonce and ciphertext from CTR output
   const ctrCiphertext = ctrEncrypted.subarray(BYTES.NONCE);
@@ -659,15 +677,28 @@ export async function decryptWithPasswordAEADFast(
   
   if (onProgress) onProgress(20);
   
-  // Decrypt with fast CTR
-  const decrypted = await decryptCTRFast(
-    ctrEncrypted,
-    key,
-    (progress) => {
-      // Map CTR progress (0-100) to overall progress (20-95)
-      if (onProgress) onProgress(20 + Math.floor(progress * 0.75));
-    }
-  );
+  // Decrypt with C++ WASM parallel (fastest) with fallback to JavaScript
+  let decrypted: Uint8Array;
+  try {
+    decrypted = await decryptCTRCppParallel(
+      ctrEncrypted,
+      key,
+      (progress) => {
+        // Map CTR progress (0-100) to overall progress (20-95)
+        if (onProgress) onProgress(20 + Math.floor(progress * 0.75));
+      }
+    );
+  } catch (error) {
+    // Fallback to JavaScript if C++ WASM fails
+    console.warn('C++ WASM failed, using JavaScript fallback:', error);
+    decrypted = await decryptCTRFast(
+      ctrEncrypted,
+      key,
+      (progress) => {
+        if (onProgress) onProgress(20 + Math.floor(progress * 0.75));
+      }
+    );
+  }
   
   if (onProgress) onProgress(100);
   
